@@ -1,0 +1,371 @@
+import os
+import sys
+import time
+import json
+import pprint
+import random
+import numpy as np
+import warnings
+from thop import profile
+warnings.filterwarnings("ignore")
+from torch import optim as optim
+from easydict import EasyDict as EDict
+from tqdm import tqdm, trange
+from collections import OrderedDict
+import torch
+import torch.nn as nn
+import math
+import torch.backends.cudnn as cudnn
+
+
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+
+#sys.path.append("/media/jianglab/experiment/ZQ/DL-DKD")
+sys.path.append("/home/jd/桌面/MGAKD")
+from method.config import BaseOptions
+from method.model import DLDKD
+
+from method.data_provider import Dataset4DLDKD, VisDataSet4DLDKD, \
+    TxtDataSet4DLDKD, collate_train, read_video_ids
+
+from method.eval import eval_epoch, start_inference
+from method.optimization import BertAdam
+from utils.basic_utils import AverageMeter, BigFile, read_dict, log_config
+from utils.model_utils import count_parameters
+
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(format="%(asctime)s.%(msecs)03d:%(levelname)s:%(name)s - %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
+
+
+def weight_decay(k, rate):
+    weight = k ** rate
+    return weight
+
+
+def weight_sigmoid_decay(k, epoch):
+    weight = k / (k + math.exp(epoch * 100 / k))
+    return weight
+
+
+def weight_linear_decay(b, k, epoch):
+    weight = k * epoch + b
+    weight = max(weight, 0.05)
+    return weight
+
+
+def weight_up(weight, rate):
+    weight = weight ** rate
+    return weight
+
+
+def set_seed(seed, use_cuda=True):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if use_cuda:
+        torch.cuda.manual_seed_all(seed)
+
+
+def train_epoch(model, train_loader, optimizer, opt, epoch_i, training=True):
+    logger.info("use train_epoch func for training: {}".format(training))
+    model.train(mode=training)
+    if opt.hard_negative_start_epoch != -1 and epoch_i >= opt.hard_negative_start_epoch:
+        model.set_hard_negative(True, opt.hard_pool_size)
+
+    # init meters
+    dataloading_time = AverageMeter()
+    prepare_inputs_time = AverageMeter()
+    model_forward_time = AverageMeter()
+    model_backward_time = AverageMeter()
+
+    loss_meters = OrderedDict(loss_overall=AverageMeter(),
+                              sub_frame_nce_loss=AverageMeter(), sub_frame_trip_loss=AverageMeter(),
+                              aud_frame_nce_loss=AverageMeter(), aud_frame_trip_loss=AverageMeter(),
+                              sub_neg_term_loss=AverageMeter(), aud_neg_term_loss=AverageMeter()
+                              )
+
+    num_training_examples = len(train_loader)
+
+    timer_dataloading = time.time()
+
+    # 蒸馏损失权重下降
+    if opt.decay_way != 0:
+        if opt.decay_way == 1:
+            # 指数下降
+            model.weight = weight_decay(opt.exponential_k, epoch_i)
+        elif opt.decay_way == 2:
+            # 线性下降
+            model.weight = weight_linear_decay(opt.linear_b, opt.linear_k, epoch_i)
+        elif opt.decay_way == 3:
+            # sigmoid下降
+            model.weight = weight_sigmoid_decay(opt.sigmoid_k, epoch_i)
+        elif opt.decay_way == 4:
+            # 指数上升
+            model.weight = 1 - weight_decay(opt.exponential_k, epoch_i)
+        elif opt.decay_way == 5:
+            # 线性上升
+            model.weight = 1 - weight_linear_decay(opt.linear_b, opt.linear_k, epoch_i)
+        elif opt.decay_way == 6:
+            # sigmoid上升
+            model.weight = 1 - weight_sigmoid_decay(opt.sigmoid_k, epoch_i)
+        elif opt.decay_way == 7:
+            #指数上升
+            model.weight = min(0.001*weight_up(1.05,epoch_i),0.1)
+        elif opt.decay_way == 8:
+            model.weight = max(min(0.1*(1 - weight_decay(opt.exponential_k, epoch_i)),0.1),0.001)
+
+
+    for batch_idx, batch in tqdm(enumerate(train_loader), desc="Training Iteration", total=num_training_examples):
+        global_step = epoch_i * num_training_examples + batch_idx
+        dataloading_time.update(time.time() - timer_dataloading)
+
+        timer_start = time.time()
+        for k in batch.keys():
+            if k != 'text_labels' and batch[k] is not None and k != 'cap_ids':
+                batch[k] = batch[k].to(opt.device)
+        # model_inputs = prepare_batch_inputs(batch[1], opt.device, non_blocking=opt.pin_memory)
+        prepare_inputs_time.update(time.time() - timer_start)
+        timer_start = time.time()
+        loss, loss_dict = model(batch['frame_video_features'], batch['frame_sub_features'], batch['frame_aud_features'],
+                                batch['videos_mask'], batch['subs_mask'], batch['auds_mask'],
+                                batch['text_feat'], batch['text_mask'], batch['text_labels'], batch['cap_ids'])
+
+        model_forward_time.update(time.time() - timer_start)
+        timer_start = time.time()
+        if training:
+            optimizer.zero_grad()
+            loss.backward()
+            if opt.grad_clip != -1:
+                nn.utils.clip_grad_norm_(model.parameters(), opt.grad_clip)
+            optimizer.step()
+            model_backward_time.update(time.time() - timer_start)
+            opt.writer.add_scalar("Train/LR", float(optimizer.param_groups[0]["lr"]), global_step)
+            for k, v in loss_dict.items():
+                opt.writer.add_scalar("Train/{}".format(k), v, global_step)
+
+        for k, v in loss_dict.items():
+            loss_meters[k].update(float(v))
+
+        timer_dataloading = time.time()
+        if opt.debug and batch_idx == 3:
+            break
+
+    if training:
+
+        to_write = opt.train_log_txt_formatter.format(time_str=time.strftime("%Y_%m_%d_%H_%M_%S"), epoch=epoch_i,
+                                                      loss_str=" ".join(["{} {:.4f}".format(k, v.avg)
+                                                                         for k, v in loss_meters.items()]))
+        with open(opt.train_log_filepath, "a") as f:
+            f.write(to_write)
+        print("Epoch time stats:")
+        print("dataloading_time: max {dataloading_time.max} min {dataloading_time.min} avg {dataloading_time.avg}\n"
+              "prepare_inputs_time: max {prepare_inputs_time.max} "
+              "min {prepare_inputs_time.min} avg {prepare_inputs_time.avg}\n"
+              "model_forward_time: max {model_forward_time.max} "
+              "min {model_forward_time.min} avg {model_forward_time.avg}\n"
+              "model_backward_time: max {model_backward_time.max} "
+              "min {model_backward_time.min} avg {model_backward_time.avg}\n".format(
+            dataloading_time=dataloading_time, prepare_inputs_time=prepare_inputs_time,
+            model_forward_time=model_forward_time, model_backward_time=model_backward_time))
+    else:
+        for k, v in loss_meters.items():
+            opt.writer.add_scalar("Eval_Loss/{}".format(k), v.avg, epoch_i)
+
+
+def rm_key_from_odict(odict_obj, rm_suffix):
+    """remove key entry from the OrderedDict"""
+    return OrderedDict([(k, v) for k, v in odict_obj.items() if rm_suffix not in k])
+
+
+def train(model, train_dataset, val_video_dataset, val_text_dataset, opt):
+    if opt.device.type == "cuda":
+        logger.info("CUDA enabled.")
+        #print("?????????????????????????")
+        model.to(opt.device)
+        if len(opt.device_ids) > 1:
+            logger.info("Use multi GPU", opt.device_ids)
+            model = torch.nn.DataParallel(model, device_ids=opt.device_ids)  # use multi GPU
+    # input1 = torch.randn(128, 32, 3072).to(opt.device)
+    # input2 = torch.randn(128, 100, 3072).to(opt.device)
+    # input3 = torch.randn(128, 100, 512).to(opt.device)
+    # input4 = torch.randn(128, 100).to(opt.device)
+    # input5 = torch.randn(640, 28, 768).to(opt.device)
+    # input9 = torch.randn(640, 28).to(opt.device)
+    # input6 = torch.randn(640, 512).to(opt.device)
+    # input7 = [1]*640
+    # input8 = torch.ones(640).to(opt.device)
+    # Flops, params = profile(model,
+    #                         inputs=(input1, input2, input3, input4, input5, input9, input6, input7, input8,))  # macs
+    # print('Flops: % .4fG' % (Flops / 1000000000))  # 计算量
+    # print('params参数量: % .4fM' % (params / 1000000))  # 参数量：等价与上面的summary输出的Total params值
+    train_loader = DataLoader(dataset=train_dataset, batch_size=opt.bsz, shuffle=True, pin_memory=opt.pin_memory,
+                              num_workers=opt.num_workers, collate_fn=collate_train)
+    # train_loader = DataLoader(dataset=train_dataset, batch_size=opt.bsz, shuffle=True, pin_memory=False,
+    #                           num_workers=opt.num_workers, collate_fn=collate_train)
+
+    # Prepare optimizer
+    param_optimizer = list(model.named_parameters())
+    no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
+    optimizer_grouped_parameters = [
+        {"params": [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], "weight_decay": 0.01},
+        {"params": [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], "weight_decay": 0.0}]
+
+    num_train_optimization_steps = len(train_loader) * opt.n_epoch
+
+    optimizer = BertAdam(optimizer_grouped_parameters, lr=opt.lr, weight_decay=opt.wd, warmup=opt.lr_warmup_proportion,
+                         t_total=num_train_optimization_steps,
+                         schedule="warmup_linear")  # "warmup_cosine""warmup_constant""warmup_linear"
+    # wd is weight decay
+    prev_best_score = 0.
+    es_cnt = 0
+    start_epoch = -1 if opt.eval_untrained else 0
+
+    for epoch_i in trange(start_epoch, opt.n_epoch, desc="Epoch"):
+        model.epoch = epoch_i
+        if epoch_i > -1:
+            with torch.autograd.detect_anomaly():
+                train_epoch(model, train_loader, optimizer, opt, epoch_i, training=True)
+        with torch.no_grad():
+            rsum = eval_epoch(model, val_video_dataset, val_text_dataset, opt)
+
+        stop_score = rsum
+        # if epoch_i==19:
+        #     torch.save(model.state_dict(), f'/home/zms/code/clip_guided/{pre_train_model_name}.pth')
+        # es_cnt is the count for not get better rsum for how many epoch, if es_cnt>max_es_cnt, stop training
+        # if get a better score, es_cnt=0, save the better result
+        if stop_score > prev_best_score:
+            es_cnt = 0
+            prev_best_score = stop_score
+            checkpoint = {"model": model.state_dict(), "model_cfg": model.config, "epoch": epoch_i}
+            torch.save(checkpoint, opt.ckpt_filepath)
+
+            logger.info("The checkpoint file has been updated.")
+        else:
+            es_cnt += 1
+            if opt.max_es_cnt != -1 and es_cnt > opt.max_es_cnt:  # early stop
+                with open(opt.train_log_filepath, "a") as f:
+                    f.write("Early Stop at epoch {}".format(epoch_i))
+                break
+        if opt.debug:
+            break
+
+    opt.writer.close()
+
+
+"""get the corresponding path of video and caption(train and val), then load visual and caption feature
+    Save the model configs in dictionary format
+    call train function
+    output opt.results_dir, opt.eval_split_name, opt.eval_path, opt.debug, opt.model_name
+"""
+def start_training(opt):
+    if opt.debug:  # keep the model run deterministically
+        # 'cudnn.benchmark = True' enabled auto finding the best algorithm for a specific input/net config.
+        # Enable this only when input size is fixed.
+        cudnn.benchmark = False   # make it easy to reproduce and improve the speed of training
+        cudnn.deterministic = True   # Maintain reproducibility
+
+    opt.writer = SummaryWriter(opt.tensorboard_log_dir)
+    opt.train_log_txt_formatter = "{time_str} [Epoch] {epoch:03d} [Loss] {loss_str}\n"
+    opt.eval_log_txt_formatter = "{time_str} [Epoch] {epoch:03d} [Metrics] {eval_metrics_str}\n"
+
+    rootpath = opt.root_path
+
+    collection = opt.collection
+    # collection is the dataset name tvr/ activitynet
+    trainCollection = '%strain' % collection
+    valCollection = '%sval' % collection
+
+    cap_file = {'train': '%s.caption.txt' % trainCollection,
+                'val': '%s.caption.txt' % valCollection, }
+    # cap_file is train(dataset).caption.txt val(dataset).caption.txt , the train and val dataset name
+    # text_feat_path = os.path.join(rootpath, collection, 'TextData', 'roberta_%s_query_feat.hdf5' % collection)
+    text_feat_path = os.path.join(rootpath, collection, 'TextData', 'Activitynet_CLIP_query_feat.h5')
+
+    # caption
+    caption_files = {x: os.path.join(rootpath, collection, 'TextData', cap_file[x])
+                     for x in cap_file}
+    # Load visual features
+    # visual_feat_path = os.path.join(rootpath, collection, 'FeatureData', opt.visual_feature)
+    # clip_vid_feat_path = os.path.join(rootpath, collection, 'FeatureData',f'clip_{opt.clip_model_name}_%s_vid_feat.hdf5' % collection)
+    clip_vid_feat_path = os.path.join(rootpath, collection, 'FeatureData',
+                                      f'new_clip_vit_32_{collection}_vid_features.hdf5')
+    clip_text_feat_path = os.path.join(rootpath, collection, 'TextData',
+                                       f'clip_ViT_B_32_%s_query_feat.hdf5' % collection)
+    # visual_feats = BigFile(visual_feat_path)
+
+    ################################################
+    # opt.visual_feat_dim = visual_feats.ndims
+    opt.visual_feat_dim = 512
+    ################################################
+
+    video2frames = read_dict(os.path.join(rootpath, collection, 'FeatureData', opt.visual_feature, 'video2frames.txt'))
+
+    sub_feat_path = os.path.join(rootpath, collection, 'FeatureData',
+                                       f'Activitynet_CLIP_Caption_feat.h5')
+
+    aud_feat_path = os.path.join(rootpath, collection, 'FeatureData',
+                                       f'activitynet_audio_mean_pool_feat.h5')
+
+    train_dataset = Dataset4DLDKD(caption_files['train'], clip_vid_feat_path, sub_feat_path, aud_feat_path, text_feat_path,
+                                  opt, video2frames=video2frames)
+
+    val_text_dataset = TxtDataSet4DLDKD(caption_files['val'], text_feat_path, opt)
+
+    val_video_ids_list = read_video_ids(caption_files['val'])
+
+    sub_feat_path = os.path.join(rootpath, collection, 'FeatureData',
+                                 f'Activitynet_CLIP_Caption_feat.h5')
+
+    aud_feat_path = os.path.join(rootpath, collection, 'FeatureData',
+                                 f'activitynet_audio_mean_pool_feat.h5')
+
+    val_video_dataset = VisDataSet4DLDKD(clip_vid_feat_path, sub_feat_path, aud_feat_path, video2frames, opt, video_ids=val_video_ids_list)
+
+    model_config = EDict(
+        visual_input_size=opt.visual_feat_dim,
+        query_input_size=opt.q_feat_size,  # for both desc and subtitles
+        A_hidden_size=opt.A_hidden_size,  # hidden dimension
+        B_hidden_size=opt.B_hidden_size,  # hidden dimension
+        C_hidden_size=opt.C_hidden_size,
+        max_ctx_l=opt.max_ctx_l,
+        max_desc_l=opt.max_desc_l,
+        map_size=opt.map_size,
+        input_drop=opt.input_drop,
+        device=opt.device_ids,
+        drop=opt.drop,
+        n_heads=opt.n_heads,  # self-att heads
+        initializer_range=opt.initializer_range,  # for linear layer
+        margin=opt.margin,  # margin for ranking loss
+        use_hard_negative=False,  # reset at each epoch
+        hard_pool_size=opt.hard_pool_size)
+    logger.info("model_config {}".format(model_config))
+
+    NAME_TO_MODELS = {'DLDKD': DLDKD}
+    model = NAME_TO_MODELS[opt.model_name](model_config, opt)
+    count_parameters(model)
+
+    logger.info("Start Training...")
+    train(model, train_dataset, val_video_dataset, val_text_dataset, opt)
+    return opt.results_dir, opt.eval_split_name, opt.eval_path, opt.debug, opt.model_name
+
+
+if __name__ == '__main__':
+    logger.info("Setup config, data and model...")
+    opt = BaseOptions().parse()
+    set_seed(opt.seed)
+    log_config(opt.results_dir, 'performance')
+    model_dir, eval_split_name, eval_path, debug, model_name = start_training(opt)
+    if not debug:
+        model_dir = model_dir.split(os.sep)[-1]
+# Slice the system separator as the split point, and take the last slice
+        input_args = ["--model_dir", model_dir, "--eval_split_name", eval_split_name,
+                      "--eval_path", eval_path]
+        sys.argv[1:] = input_args
+        logger.info("\n\n\nFINISHED TRAINING!!!")
+        logger.info("Evaluating model in {}".format(model_dir))
+        logger.info("Input args {}".format(sys.argv[1:]))
+        start_inference()
