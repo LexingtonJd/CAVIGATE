@@ -63,10 +63,10 @@ source setup.sh
 ## CheckPoint
 We provide the trained checkpoints on the ActivityNet Captions and TVR datasets [here](https://drive.google.com/drive/folders/1F_XLEwJMO7oorxRoSakQGRhxyGnh_u-o?usp=drive_link), with their expected performance metrics as follows:
 ### RoBERTa + I3D + ResNet
-| Dataset              | R@1  | R@5  | R@10 |
-|----------------------|------|------|------|
-| ActivityNet Captions | 12.3 | 34.5 | 56.7 |
-| TVR                  | 10.2 | 30.1 | 50.4 |
+| Dataset              | R@1  | R@5  | R@10 | R@100 | SumR |
+|----------------------|------|------|------|------|------|
+| ActivityNet Captions | 9.7 | 28.9 | 41.4 | 78.7 | 158.7 |
+| TVR                  | 18.1 | 40.7 | 51.7 | 87.3 | 197.7 |
 
 ### CLIP-ViT/B32
 | Dataset              | R@1  | R@5  | R@10  | MedR | MnR   |
