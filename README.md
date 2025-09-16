@@ -6,6 +6,24 @@ This repository is the official PyTorch implementation of our paper CAVIGATE: Ca
 - [Datasets](#Datasets)
 
 ## Environments
+- Python 3.8  
+- PyTorch 1.9.0  
+- torchvision 0.10.0  
+- TensorBoard 2.6.0  
+- tqdm 4.62.0  
+- easydict 1.9  
+- h5py 2.10.0  
+- CUDA 11.1
+
+We used Anaconda to set up a deep learning workspace that supports PyTorch. Run the following commands to create the environment and install the required packages:
+
+```bash
+conda create --name DLDKD python=3.8 -y
+conda activate DLDKD
+git clone https://github.com/HuiGuanLab/DL-DKD.git
+cd DL-DKD
+pip install -r requirements.txt
+conda deactivate
 
 
 ## Datasets
