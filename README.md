@@ -3,10 +3,10 @@ This repository is the official PyTorch implementation of our paper CAVIGATE: Ca
 
 ## Table of Contents
 - [Environments](#environments)
-- [How to Use](#how-to-use)
+- [Datasets](#Datasets)
 
 ## Environments
 
 
-## How to Use
+## Datasets
 .
