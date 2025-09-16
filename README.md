@@ -46,3 +46,4 @@ source setup.sh
 ./do_tvr.sh
  ```
 ## Evaluation
+The model is placed in the directory $root_path/results/$model_dir after training. To evaluate it, please run the following script:
