@@ -60,3 +60,7 @@ To evaluate CAVIGATE on TVR:
 source setup.sh
 ./test_t.sh
  ```
+## CheckPoint
+We provide the trained checkpoints on the ActivityNet Captions and TVR datasets [here](https://drive.google.com/drive/folders/1F_XLEwJMO7oorxRoSakQGRhxyGnh_u-o?usp=drive_link), with their expected performance metrics as follows:
+- Roberta+I3D+ResNet:
+- CLIP-VIT/B32
