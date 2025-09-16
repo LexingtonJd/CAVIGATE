@@ -6,6 +6,7 @@ This repository is the official PyTorch implementation of our paper CAVIGATE: Ca
 - [Datasets](#Datasets)
 - [Train](#Train)
 - [Evaluation](#Evaluation)
+- [Acknowledgement](#Acknowledgement)
 ## Environments
 - Python 3.8  
 - PyTorch 1.9.0  
@@ -74,5 +75,5 @@ We provide the trained checkpoints on the ActivityNet Captions and TVR datasets 
 | ActivityNet Captions | 15.0 | 36.7 | 49.8  | 83.0 | 184.5 |
 | TVR                  | 26.4 | 51.0 | 62.4  | 91.5 | 231.2 |
 
-##Acknowledgement
+## Acknowledgement
 The codes are modified from [DLDKD](https://github.com/HuiGuanLab/DL-DKD?tab=readme-ov-file#Reference) and [GMMFormer](https://github.com/huangmozhi9527/GMMFormer). We sincerely acknowledge and appreciate the significant contributions of their authors.
