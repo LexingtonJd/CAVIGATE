@@ -63,10 +63,11 @@ source setup.sh
 ## CheckPoint
 We provide the trained checkpoints on the ActivityNet Captions and TVR datasets [here](https://drive.google.com/drive/folders/1F_XLEwJMO7oorxRoSakQGRhxyGnh_u-o?usp=drive_link), with their expected performance metrics as follows:
 - Roberta+I3D+ResNet:
-| Method   | R@1  | R@5  | R@10 |
-|:---------|:----:|-----:|------|
-| CAVIGATE | 12.3 | 34.5 | 56.7 |
-| Baseline | 10.2 | 30.1 | 50.4 |
+| Dataset              | R@1  | R@5  | R@10 |
+|----------------------|------|------|------|
+| ActivityNet Captions | 12.3 | 34.5 | 56.7 |
+| TVR                  | 10.2 | 30.1 | 50.4 |
+
 
 
 - CLIP-VIT/B32
