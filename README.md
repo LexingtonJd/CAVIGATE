@@ -4,7 +4,8 @@ This repository is the official PyTorch implementation of our paper CAVIGATE: Ca
 ## Table of Contents
 - [Environments](#environments)
 - [Datasets](#Datasets)
-
+- [Train](#Train)
+- [Evaluation](#Evaluation)
 ## Environments
 - Python 3.8  
 - PyTorch 1.9.0  
@@ -30,3 +31,7 @@ You can download the complete feature sets for ActivityNet Captions and TV Show 
 
 After preparing the dataset, extract it and set the data path in the corresponding .sh file (e.g., do_activitynet.sh).
 
+## Train
+
+
+## Evaluation
