@@ -20,7 +20,7 @@ We used Anaconda to set up a deep learning workspace that supports PyTorch. Run 
 conda create --name CAIVGATE python=3.8
 conda activate CAVIGATE
 git clone https://github.com/LexingtonJd/CAVIGATE.git # 
-cd DL-CAVIGATE
+cd CAVIGATE
 pip install -r requirements.txt
 conda deactivate
  ```
