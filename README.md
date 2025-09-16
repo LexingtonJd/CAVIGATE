@@ -16,6 +16,10 @@ This repository is the official PyTorch implementation of our paper CAVIGATE: Ca
 - CUDA 11.1
 
 We used Anaconda to set up a deep learning workspace that supports PyTorch. Run the following commands to create the environment and install the required packages:
+```bash
+conda create --name DLDKD python=3.8 -y
+conda activate DLDKD
+pip install -r requirements.txt
 
 
 ## Datasets
