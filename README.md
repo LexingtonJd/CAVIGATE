@@ -74,3 +74,5 @@ We provide the trained checkpoints on the ActivityNet Captions and TVR datasets 
 | ActivityNet Captions | 15.0 | 36.7 | 49.8  | 83.0 | 184.5 |
 | TVR                  | 26.4 | 51.0 | 62.4  | 91.5 | 231.2 |
 
+##Acknowledgement
+The codes are modified from DLDKD and GMMFormer. We sincerely acknowledge and appreciate the significant contributions of their authors.
