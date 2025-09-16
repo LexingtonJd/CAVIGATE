@@ -46,4 +46,17 @@ source setup.sh
 ./do_tvr.sh
  ```
 ## Evaluation
-The model is placed in the directory $root_path/results/$model_dir after training. To evaluate it, please run the following script:
+The model is placed in the directory $root_path/results/$model_dir after training. To evaluate it, first set the checkpoint path in the corresponding .sh file (e.g., test_a.sh).
+To evaluate CAVIGATE on Activitynet Captions:
+```bash
+#Add project root to PYTHONPATH (Note that you need to do this each time you start a new session.)
+source setup.sh
+./test_a.sh
+ ```
+
+To evaluate CAVIGATE on TVR:
+```bash
+#Add project root to PYTHONPATH (Note that you need to do this each time you start a new session.)
+source setup.sh
+./test_t.sh
+ ```
