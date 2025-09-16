@@ -33,16 +33,16 @@ After preparing the dataset, extract it and set the data path in the correspondi
 
 ## Train
 To train CAVIGATE on Activitynet Captions:
-'''bash
+```bash
 #Add project root to PYTHONPATH (Note that you need to do this each time you start a new session.)
 source setup.sh
 ./do_activitynet.sh
-'''
+ ```
 
 To train CAVIGATE on TVR:
-'''bash
+```bash
 #Add project root to PYTHONPATH (Note that you need to do this each time you start a new session.)
 source setup.sh
 ./do_tvr.sh
-'''
+ ```
 ## Evaluation
