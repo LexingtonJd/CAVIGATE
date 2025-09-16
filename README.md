@@ -17,14 +17,6 @@ This repository is the official PyTorch implementation of our paper CAVIGATE: Ca
 
 We used Anaconda to set up a deep learning workspace that supports PyTorch. Run the following commands to create the environment and install the required packages:
 
-```bash
-conda create --name DLDKD python=3.8 -y
-conda activate DLDKD
-git clone https://github.com/HuiGuanLab/DL-DKD.git
-cd DL-DKD
-pip install -r requirements.txt
-conda deactivate
-
 
 ## Datasets
 You can download the complete feature sets for ActivityNet Captions and TV Show Retrieval from [here](https://drive.google.com/drive/folders/11dRUeXmsWU25VMVmeuHc9nffzmZhPJEj). These feature sets were generously provided by [MS-SL](https://github.com/HuiGuanLab/ms-sl), and we gratefully acknowledge their contribution.
